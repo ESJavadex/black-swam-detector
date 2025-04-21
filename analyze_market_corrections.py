@@ -516,6 +516,14 @@ def backtest_dip_signals(transactions_csv_path, final_price=None):
             cagr = (value / invested) ** (1/years) - 1 if invested > 0 else np.nan
         else:
             cagr = np.nan
+        # Maximum drawdown calculation for individual signals
+        if n_trades > 0 and 'Value' in df.columns:
+            trades = df.loc[mask]
+            running_max = trades['Value'].cummax()
+            drawdowns = (trades['Value'] - running_max) / running_max
+            max_drawdown = drawdowns.min() if not drawdowns.empty else np.nan
+        else:
+            max_drawdown = np.nan
         signal_stats[sig] = {
             'invested': invested,
             'shares': shares,
@@ -526,18 +534,20 @@ def backtest_dip_signals(transactions_csv_path, final_price=None):
             'avg_return': avg_return,
             'win_rate': win_rate,
             'cagr': cagr,
+            'max_drawdown': max_drawdown,
         }
 
     # 2. Composite/Composite Signal Stats (including multi-signal days)
     for name, mask in composite_strategies.items():
-        invested = df.loc[mask, 'Contribution'].sum()
-        shares = df.loc[mask, 'Shares_Bought'].sum()
+        trades = df.loc[mask]
+        invested = trades['Contribution'].sum()
+        shares = trades['Shares_Bought'].sum()
         value = shares * final_price
         profit = value - invested
-        n_trades = mask.sum()
-        trade_returns = (df.loc[mask, 'SP500_Close'] / df.loc[mask, 'SP500_Close'].iloc[0]).values if n_trades > 0 else []
+        n_trades = len(trades)
+        trade_returns = (trades['SP500_Close'] / trades['SP500_Close'].iloc[0]).values if n_trades > 0 else []
         avg_return = np.mean(trade_returns) - 1 if n_trades > 0 else np.nan
-        win_rate = np.mean(df.loc[mask, 'SP500_Close'] < final_price) if n_trades > 0 else np.nan
+        win_rate = np.mean(trades['SP500_Close'] < final_price) if n_trades > 0 else np.nan
         if n_trades > 0:
             dates = pd.to_datetime(df.loc[mask].index if df.loc[mask].index.dtype == 'datetime64[ns]' else df.loc[mask].reset_index()['index'])
             if len(dates) > 0:
@@ -547,6 +557,14 @@ def backtest_dip_signals(transactions_csv_path, final_price=None):
             cagr = (value / invested) ** (1/years) - 1 if invested > 0 else np.nan
         else:
             cagr = np.nan
+        # Maximum drawdown calculation
+        if n_trades > 0 and 'Value' in trades.columns:
+            running_max = trades['Value'].cummax()
+            drawdowns = (trades['Value'] - running_max) / running_max
+            max_drawdown = drawdowns.min() if not drawdowns.empty else np.nan
+        else:
+            max_drawdown = np.nan
+
         signal_stats[name] = {
             'invested': invested,
             'shares': shares,
@@ -557,6 +575,7 @@ def backtest_dip_signals(transactions_csv_path, final_price=None):
             'avg_return': avg_return,
             'win_rate': win_rate,
             'cagr': cagr,
+            'max_drawdown': max_drawdown,
         }
 
     # 3. Normalized (fixed $1000 per trade) cumulative value for each signal/strategy
@@ -576,11 +595,11 @@ def backtest_dip_signals(transactions_csv_path, final_price=None):
     # 4. Print Summary Table
     print("\n=== Buy-the-Dip Signal Profitability ===")
     print("NOTE: Total profit is not a fair comparison due to different invested capital. Use normalized metrics (profit/$, CAGR, win rate) for signal ranking.\n")
-    print(f"{'Signal':<35}{'Trades':>8}{'Invested':>14}{'Profit':>16}{'Profit/$':>12}{'CAGR':>10}{'WinRate':>10}{'AvgRet':>10}")
-    print("-"*120)
+    print(f"{'Signal':<35}{'Trades':>8}{'Invested':>14}{'Profit':>16}{'Profit/$':>12}{'CAGR':>10}{'WinRate':>10}{'AvgRet':>10}{'MaxDD':>10}")
+    print("-"*135)
     for sig, stats in sorted(signal_stats.items(), key=lambda x: -x[1]['profit_per_dollar']):
-        print(f"{sig:<35}{stats['n_trades']:>8}{stats['invested']:>14.2f}{stats['profit']:>16.2f}{stats['profit_per_dollar']:>12.2f}{stats['cagr']:>10.2%}{stats['win_rate']:>10.2%}{stats['avg_return']:>10.2%}")
-    print("-"*120)
+        print(f"{sig:<35}{stats['n_trades']:>8}{stats['invested']:>14.2f}{stats['profit']:>16.2f}{stats['profit_per_dollar']:>12.2f}{stats['cagr']:>10.2%}{stats['win_rate']:>10.2%}{stats['avg_return']:>10.2%}{stats['max_drawdown']:>10.2%}")
+    print("-"*135)
 
     # 5. Visualization
     try:
