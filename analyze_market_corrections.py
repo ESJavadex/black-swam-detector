@@ -461,5 +461,181 @@ def main():
         # Identify patterns
         patterns = identify_patterns(results)
 
+
+def backtest_dip_signals(transactions_csv_path, final_price=None):
+    """
+    Analyze the profitability of each buy-the-dip signal and their combinations using backtest data.
+    Prints summary stats and generates plots for each signal, composite strategies, and for composite (multi-signal) days.
+    Normalizes capital allocation for fair comparison (fixed $1000 per trade).
+    """
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import os
+    print("[DEBUG] Entered backtest_dip_signals. Current working dir:", os.getcwd())
+
+    df = pd.read_csv(transactions_csv_path)
+    df = df[df['Type'].notnull()]
+
+    if final_price is None:
+        final_price = df['SP500_Close'].iloc[-1]
+
+    def split_signals(sig):
+        return sig.split('+') if isinstance(sig, str) else []
+
+    # List of all unique signals
+    all_signals = sorted(set(sum(df['Type'].dropna().apply(split_signals), [])))
+
+    # Composite strategies definitions (as boolean masks)
+    composite_strategies = {
+        'Any 2+ Signals': df['Type'].apply(lambda x: isinstance(x, str) and x.count('+') >= 1),
+        'Extreme Dip + Market Capitulation': df['Type'].apply(lambda x: 'Extra_Extreme_Dip' in split_signals(x) and 'Market_Capitulation' in split_signals(x)),
+        'Extreme Dip OR Market Capitulation': df['Type'].apply(lambda x: 'Extra_Extreme_Dip' in split_signals(x) or 'Market_Capitulation' in split_signals(x)),
+        'Extreme Dip + Vol Spike': df['Type'].apply(lambda x: 'Extra_Extreme_Dip' in split_signals(x) and 'Vol_Spike_RSI_Dip' in split_signals(x)),
+        'Extreme Dip + Pullback': df['Type'].apply(lambda x: 'Extra_Extreme_Dip' in split_signals(x) and 'Extra_Pullback' in split_signals(x)),
+    }
+
+    # 1. Individual Signal Stats
+    signal_stats = {}
+    for sig in all_signals:
+        mask = df['Type'].apply(lambda x: sig in split_signals(x))
+        invested = df.loc[mask, 'Contribution'].sum()
+        shares = df.loc[mask, 'Shares_Bought'].sum()
+        value = shares * final_price
+        profit = value - invested
+        n_trades = mask.sum()
+        trade_returns = (df.loc[mask, 'SP500_Close'] / df.loc[mask, 'SP500_Close'].iloc[0]).values if n_trades > 0 else []
+        avg_return = np.mean(trade_returns) - 1 if n_trades > 0 else np.nan
+        win_rate = np.mean(df.loc[mask, 'SP500_Close'] < final_price) if n_trades > 0 else np.nan
+        if n_trades > 0:
+            dates = pd.to_datetime(df.loc[mask].index if df.loc[mask].index.dtype == 'datetime64[ns]' else df.loc[mask].reset_index()['index'])
+            if len(dates) > 0:
+                years = (dates.max() - dates.min()).days / 365.25 if (dates.max() - dates.min()).days > 0 else 1
+            else:
+                years = 1
+            cagr = (value / invested) ** (1/years) - 1 if invested > 0 else np.nan
+        else:
+            cagr = np.nan
+        signal_stats[sig] = {
+            'invested': invested,
+            'shares': shares,
+            'value': value,
+            'profit': profit,
+            'profit_per_dollar': profit / invested if invested > 0 else np.nan,
+            'n_trades': n_trades,
+            'avg_return': avg_return,
+            'win_rate': win_rate,
+            'cagr': cagr,
+        }
+
+    # 2. Composite/Composite Signal Stats (including multi-signal days)
+    for name, mask in composite_strategies.items():
+        invested = df.loc[mask, 'Contribution'].sum()
+        shares = df.loc[mask, 'Shares_Bought'].sum()
+        value = shares * final_price
+        profit = value - invested
+        n_trades = mask.sum()
+        trade_returns = (df.loc[mask, 'SP500_Close'] / df.loc[mask, 'SP500_Close'].iloc[0]).values if n_trades > 0 else []
+        avg_return = np.mean(trade_returns) - 1 if n_trades > 0 else np.nan
+        win_rate = np.mean(df.loc[mask, 'SP500_Close'] < final_price) if n_trades > 0 else np.nan
+        if n_trades > 0:
+            dates = pd.to_datetime(df.loc[mask].index if df.loc[mask].index.dtype == 'datetime64[ns]' else df.loc[mask].reset_index()['index'])
+            if len(dates) > 0:
+                years = (dates.max() - dates.min()).days / 365.25 if (dates.max() - dates.min()).days > 0 else 1
+            else:
+                years = 1
+            cagr = (value / invested) ** (1/years) - 1 if invested > 0 else np.nan
+        else:
+            cagr = np.nan
+        signal_stats[name] = {
+            'invested': invested,
+            'shares': shares,
+            'value': value,
+            'profit': profit,
+            'profit_per_dollar': profit / invested if invested > 0 else np.nan,
+            'n_trades': n_trades,
+            'avg_return': avg_return,
+            'win_rate': win_rate,
+            'cagr': cagr,
+        }
+
+    # 3. Normalized (fixed $1000 per trade) cumulative value for each signal/strategy
+    norm_invest = 1000
+    norm_cum_values = {}
+    for sig in list(all_signals) + list(composite_strategies.keys()):
+        if sig in composite_strategies:
+            mask = composite_strategies[sig]
+        else:
+            mask = df['Type'].apply(lambda x: sig in split_signals(x))
+        idx = df.index[mask]
+        norm_shares = norm_invest / df.loc[mask, 'SP500_Close']
+        cum_shares = norm_shares.cumsum()
+        cum_value = cum_shares * final_price
+        norm_cum_values[sig] = (idx, cum_value)
+
+    # 4. Print Summary Table
+    print("\n=== Buy-the-Dip Signal Profitability ===")
+    print("NOTE: Total profit is not a fair comparison due to different invested capital. Use normalized metrics (profit/$, CAGR, win rate) for signal ranking.\n")
+    print(f"{'Signal':<35}{'Trades':>8}{'Invested':>14}{'Profit':>16}{'Profit/$':>12}{'CAGR':>10}{'WinRate':>10}{'AvgRet':>10}")
+    print("-"*120)
+    for sig, stats in sorted(signal_stats.items(), key=lambda x: -x[1]['profit_per_dollar']):
+        print(f"{sig:<35}{stats['n_trades']:>8}{stats['invested']:>14.2f}{stats['profit']:>16.2f}{stats['profit_per_dollar']:>12.2f}{stats['cagr']:>10.2%}{stats['win_rate']:>10.2%}{stats['avg_return']:>10.2%}")
+    print("-"*120)
+
+    # 5. Visualization
+    try:
+        # Bar plot: profit per $ invested
+        labels = list(signal_stats.keys())
+        profits_per_dollar = [signal_stats[s]['profit_per_dollar'] for s in labels]
+        plt.figure(figsize=(12,6))
+        plt.bar(labels, profits_per_dollar, color='purple')
+        plt.ylabel('Profit per $ Invested')
+        plt.title('Buy-the-Dip Signal Power Ranking')
+        plt.xticks(rotation=45, ha='right')
+        # Draw horizontal line at Fixed_DCA profit per dollar
+        if 'Fixed_DCA' in signal_stats:
+            fixed_dca_ppd = signal_stats['Fixed_DCA']['profit_per_dollar']
+            plt.axhline(fixed_dca_ppd, color='red', linestyle='--', linewidth=2, label='Fixed DCA Baseline')
+            plt.legend()
+        plt.tight_layout()
+        plt.savefig('signal_profit_per_dollar.png')
+        plt.close()
+        print("\nBar chart saved as 'signal_profit_per_dollar.png'")
+    except Exception as e:
+        print(f"Plotting failed: {e}")
+
+    # 6. Normalized Cumulative Value Plot
+    try:
+        plt.figure(figsize=(14,8))
+        for sig in sorted(norm_cum_values, key=lambda x: -signal_stats[x]['profit_per_dollar'])[:6]:
+            idx, cum_value = norm_cum_values[sig]
+            plt.plot(idx, cum_value, label=f'{sig}')
+        plt.legend()
+        plt.title('Cumulative Value (Normalized $1000/trade): Top Buy-the-Dip Strategies')
+        plt.xlabel('Trade #')
+        plt.ylabel('Portfolio Value ($)')
+        plt.tight_layout()
+        plt.savefig('signal_cumulative_value_normalized.png')
+        plt.close()
+        print("Cumulative value chart (normalized) saved as 'signal_cumulative_value_normalized.png'")
+    except Exception as e:
+        print(f"Cumulative plot failed: {e}")
+
+    print("[DEBUG] Attempting to save signal_stats_summary.csv...")
+    stats_df = pd.DataFrame(signal_stats).T
+    stats_df.index.name = 'Signal'
+    stats_df.reset_index(inplace=True)
+    csv_path = os.path.abspath('signal_stats_summary.csv')
+    stats_df.to_csv(csv_path, index=False)
+    print(f"[DEBUG] Signal stats saved to {csv_path} in directory: {os.getcwd()}")
+    # 8. Return stats for further programmatic use
+    return {
+        'signal_stats': signal_stats,
+        'norm_cum_values': norm_cum_values,
+    }
+
 if __name__ == "__main__":
     main()
+    # Run the buy-the-dip signal backtest and analysis
+    print("\n\n=== Running Buy-the-Dip Signal Backtest ===")
+    backtest_dip_signals("enhanced_dca_transactions.csv", final_price=298915.7558)
