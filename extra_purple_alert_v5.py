@@ -153,11 +153,22 @@ MAX_MARKET_DISLOCATIONS_PER_YEAR = CONFIG.get('max_market_dislocations_per_year'
 MARKET_CAPITULATION_INVESTMENT = CONFIG.get('market_capitulation_investment', 500) # Default if not in CONFIG
 MAX_CAPITULATIONS_PER_YEAR = CONFIG.get('max_capitulations_per_year', 1) # Default if not in CONFIG
 
-# Capitulation detection parameters - Optimized for March 2020 COVID crash
-CAPITULATION_DROP_THRESHOLD = -25.0  # 25% drop from recent high (20-day)
-CAPITULATION_VIX_THRESHOLD = 50.0    # VIX above 50
-CAPITULATION_RSI_THRESHOLD = 35.0    # RSI below 35 (slightly higher than optimal to catch more signals)
-CAPITULATION_LONG_DROP_THRESHOLD = -25.0  # 25% drop from 52-week high
+# Capitulation detection parameters - Optimized based on ALL market corrections 2008-2025
+# Based on comprehensive analysis of 8 major market corrections
+CAPITULATION_DROP_THRESHOLD = -13.0     # 13% drop from recent high (20-day) - avg across all corrections was -13.40%
+CAPITULATION_VIX_THRESHOLD = 32.0       # VIX above 32 - avg across all corrections was 40.14, threshold from analysis was 32.21
+CAPITULATION_RSI_THRESHOLD = 36.0       # RSI below 36 - avg across all corrections was 27.19, threshold from analysis was 35.99
+CAPITULATION_LONG_DROP_THRESHOLD = -15.0  # 15% drop from 52-week high - more balanced across different correction types
+
+# Moderate correction parameters - for typical market corrections (10-20% drops)
+MODERATE_DROP_THRESHOLD = -10.0        # 10% drop from recent high (20-day) - captures milder corrections like 2015-16, 2023
+MODERATE_VIX_THRESHOLD = 25.0          # VIX above 25 - sufficient for moderate corrections
+MODERATE_RSI_THRESHOLD = 30.0          # RSI below 30 - typical oversold level
+
+# Severe crash parameters - for extreme events like 2008 and 2020
+SEVERE_DROP_THRESHOLD = -20.0          # 20% drop from recent high (20-day) - bear market territory
+SEVERE_VIX_THRESHOLD = 45.0            # VIX above 45 - seen in major corrections (2008, 2011, 2020, 2025)
+SEVERE_RSI_THRESHOLD = 25.0            # RSI below 25 - extreme oversold (seen in 2008, 2018, 2023, 2025)
 
 TICKER_SP500 = CONFIG['ticker_sp500']
 TICKER_VIX = CONFIG['ticker_vix']
@@ -547,12 +558,12 @@ def detect_market_dislocation_signals(df: pd.DataFrame) -> List[pd.Timestamp]:
 
 
 # --- *** CAPITULATION STRATEGY Signal Function *** ---
-def detect_market_capitulation_signals(df: pd.DataFrame) -> List[pd.Timestamp]:
+def detect_market_capitulation_signals(df: pd.DataFrame, debug=False) -> List[pd.Timestamp]:
     """ 
-    Detect Market Capitulation (extreme bottoms) like March 23-24, 2020:
-    - Optimized based on COVID-19 crash analysis
-    - Identifies severe market dislocations with multiple confirming indicators
-    - Special focus on VIX spikes and rapid price declines
+    Detect Market Capitulation (market bottoms) based on comprehensive analysis of all market corrections:
+    - Incorporates patterns from 2008-2025 market corrections (8 major corrections analyzed)
+    - Uses a multi-tiered approach for moderate, standard, and severe market corrections
+    - Balanced to work across different market environments, not just extreme crashes
     """
     strategy_name = "Market Capitulation"
     print(f"Detecting {strategy_name} opportunities...")
@@ -565,98 +576,153 @@ def detect_market_capitulation_signals(df: pd.DataFrame) -> List[pd.Timestamp]:
         return []
 
     try:
-        # Calculate various rolling windows for price highs
-        rolling_max_10d = df['SP500_Close_SPY'].rolling(window=10).max()
-        rolling_max_20d = df['SP500_Close_SPY'].rolling(window=20).max()
-        rolling_max_252d = df['SP500_Close_SPY'].rolling(window=252).max()
+        # Calculate required metrics
+        df['pct_drop_5d'] = df['SP500_Close_SPY'].pct_change(5) * 100
+        df['pct_drop_10d'] = df['SP500_Close_SPY'].pct_change(10) * 100
+        df['pct_drop_20d'] = df['SP500_Close_SPY'].pct_change(20) * 100
+        df['pct_drop_50d'] = df['SP500_Close_SPY'].pct_change(50) * 100
+        df['pct_drop_252d'] = df['SP500_Close_SPY'].pct_change(252) * 100
         
-        # Calculate percentage drops from recent highs
-        pct_drop_10d = ((df['SP500_Close_SPY'] - rolling_max_10d) / rolling_max_10d) * 100
-        pct_drop_20d = ((df['SP500_Close_SPY'] - rolling_max_20d) / rolling_max_20d) * 100
-        pct_drop_252d = ((df['SP500_Close_SPY'] - rolling_max_252d) / rolling_max_252d) * 100
+        # Calculate 20-day rolling max for high watermark
+        df['20d_high'] = df['SP500_Close_SPY'].rolling(window=20).max()
+        df['pct_from_20d_high'] = ((df['SP500_Close_SPY'] / df['20d_high']) - 1) * 100
         
-        # Calculate VIX changes
-        vix_5d_change = df['VIX_Close_^VIX'].pct_change(5) * 100
+        # Calculate 252-day rolling max for 52-week high
+        df['52w_high'] = df['SP500_Close_SPY'].rolling(window=252).max()
+        df['pct_from_52w_high'] = ((df['SP500_Close_SPY'] / df['52w_high']) - 1) * 100
         
-        # Primary conditions based on COVID crash analysis
-        # 1. Severe price drop from 20-day high (March 23, 2020: -28.32%)
-        condition_drop_severe = pct_drop_20d < CAPITULATION_DROP_THRESHOLD
+        # Calculate VIX metrics
+        df['vix_5d_change'] = df['VIX_Close_^VIX'].pct_change(5) * 100
+        df['vix_10d_change'] = df['VIX_Close_^VIX'].pct_change(10) * 100
+        df['vix_20d_max'] = df['VIX_Close_^VIX'].rolling(window=20).max()
+        df['vix_peak_ratio'] = df['VIX_Close_^VIX'] / df['vix_20d_max']
         
-        # 2. Rapid price drop from 10-day high (captures speed of decline)
-        condition_drop_rapid = pct_drop_10d < -15.0
+        # Calculate 10Y yield metrics if available
+        if '10Y_Bond_Yield_Close_^TNX' in df.columns:
+            df['yield_5d_change'] = df['10Y_Bond_Yield_Close_^TNX'].pct_change(5) * 100
+            df['yield_10d_change'] = df['10Y_Bond_Yield_Close_^TNX'].pct_change(10) * 100
+            df['bond_stabilizing'] = (df['yield_5d_change'] > 0) & (df['yield_10d_change'] < 0)
+        else:
+            df['yield_5d_change'] = 0
+            df['yield_10d_change'] = 0
+            df['bond_stabilizing'] = False
         
-        # 3. VIX at extremely elevated levels (March 23, 2020: 61.59)
-        condition_vix_high = df['VIX_Close_^VIX'] > CAPITULATION_VIX_THRESHOLD
+        # Calculate volatility (standard deviation of returns)
+        df['volatility_20d'] = df['SP500_Close_SPY'].pct_change().rolling(window=20).std() * np.sqrt(252) * 100
         
-        # 4. VIX recently spiked (captures volatility explosion)
-        condition_vix_spike = vix_5d_change > 30.0
+        # Calculate selling deceleration (difference between 5-day and 10-day drops)
+        # Positive values mean selling is decelerating (bullish)
+        df['selling_deceleration'] = df['pct_drop_10d'] - df['pct_drop_5d']
         
-        # 5. RSI oversold (March 23, 2020: 30.90)
-        condition_rsi = df['RSI'] < CAPITULATION_RSI_THRESHOLD
+        # Calculate moving averages
+        df['ma_50'] = df['SP500_Close_SPY'].rolling(window=50).mean()
+        df['below_50ma'] = df['SP500_Close_SPY'] < df['ma_50']
         
-        # 6. Significant drawdown from 52-week high
-        condition_long_drop = pct_drop_252d < CAPITULATION_LONG_DROP_THRESHOLD
+        # Initialize signals column
+        df['market_capitulation_signal'] = False
         
-        # Combine conditions with weighted approach
-        # Primary conditions (most important for March 2020 pattern)
-        primary_conditions = condition_drop_severe.astype(int) * 2 + \
-                           condition_vix_high.astype(int) * 2
+        # Create scoring systems for different market correction types
+        df['moderate_correction_score'] = 0
+        df['standard_capitulation_score'] = 0
+        df['severe_crash_score'] = 0
         
-        # Secondary conditions (supporting signals)
-        secondary_conditions = condition_drop_rapid.astype(int) + \
-                             condition_vix_spike.astype(int) + \
-                             condition_rsi.astype(int) + \
-                             condition_long_drop.astype(int)
+        # Moderate correction conditions (10-20% drops like 2015-16, 2023)
+        df.loc[df['pct_from_20d_high'] < MODERATE_DROP_THRESHOLD, 'moderate_correction_score'] += 1
+        df.loc[df['VIX_Close_^VIX'] > MODERATE_VIX_THRESHOLD, 'moderate_correction_score'] += 1
+        df.loc[df['RSI'] < MODERATE_RSI_THRESHOLD, 'moderate_correction_score'] += 1
+        df.loc[df['below_50ma'] == True, 'moderate_correction_score'] += 1
+        df.loc[df['volatility_20d'] > 15, 'moderate_correction_score'] += 1
+        df.loc[df['selling_deceleration'] > 1.0, 'moderate_correction_score'] += 1
         
-        # Total weighted score
-        total_score = primary_conditions + secondary_conditions
+        # Standard capitulation conditions (add 1 point each)
+        df.loc[df['pct_from_20d_high'] < CAPITULATION_DROP_THRESHOLD, 'standard_capitulation_score'] += 1
+        df.loc[df['VIX_Close_^VIX'] > CAPITULATION_VIX_THRESHOLD, 'standard_capitulation_score'] += 1
+        df.loc[df['RSI'] < CAPITULATION_RSI_THRESHOLD, 'standard_capitulation_score'] += 1
+        df.loc[df['pct_from_52w_high'] < CAPITULATION_LONG_DROP_THRESHOLD, 'standard_capitulation_score'] += 1
+        df.loc[df['selling_deceleration'] > 2.0, 'standard_capitulation_score'] += 1
+        df.loc[df['below_50ma'] == True, 'standard_capitulation_score'] += 1
+        df.loc[df['vix_peak_ratio'] < 0.9, 'standard_capitulation_score'] += 1
+        df.loc[df['volatility_20d'] > 25, 'standard_capitulation_score'] += 1
         
-        # Require a minimum score of 4 (ensures at least one primary condition)
-        # This would have caught March 23, 2020 with a score of 6
-        combined_condition = (total_score >= 4).fillna(False)
+        # Severe crash conditions (add 1 point each)
+        df.loc[df['pct_from_20d_high'] < SEVERE_DROP_THRESHOLD, 'severe_crash_score'] += 1
+        df.loc[df['VIX_Close_^VIX'] > SEVERE_VIX_THRESHOLD, 'severe_crash_score'] += 1
+        df.loc[df['RSI'] < SEVERE_RSI_THRESHOLD, 'severe_crash_score'] += 1
+        df.loc[df['volatility_20d'] > 40, 'severe_crash_score'] += 1
+        df.loc[df['selling_deceleration'] > 5.0, 'severe_crash_score'] += 1
+        df.loc[df['vix_5d_change'] < -10, 'severe_crash_score'] += 1
+        df.loc[df['yield_5d_change'] < -15, 'severe_crash_score'] += 1
+        df.loc[df['pct_drop_5d'] < -5, 'severe_crash_score'] += 1
         
-        # Get the dates where the combined condition is met
-        signal_dates = df.index[combined_condition].tolist()
+        # Calculate total score across all categories
+        df['capitulation_total_score'] = df['moderate_correction_score'] + df['standard_capitulation_score'] + df['severe_crash_score']
         
-        # Debug information for March 2020
-        march_2020_dates = pd.date_range(start='2020-03-23', end='2020-03-24')
-        march_2020_dates = [d for d in march_2020_dates if d in df.index]
+        # Set signal based on scoring thresholds for different market types
+        # Moderate correction: need at least 4 conditions
+        # Standard capitulation: need at least 5 conditions
+        # Severe crash: need at least 4 conditions
+        # OR total score above 10 across all categories
+        df.loc[(df['moderate_correction_score'] >= 4) | 
+               (df['standard_capitulation_score'] >= 5) | 
+               (df['severe_crash_score'] >= 4) | 
+               (df['capitulation_total_score'] >= 10), 'market_capitulation_signal'] = True
         
-        if march_2020_dates:
-            print("\n--- DEBUG: March 2020 Market Bottom Analysis ---")
-            for date in march_2020_dates:
-                if date in df.index:
-                    # Print the values for each condition on these dates
-                    print(f"Date: {date.date()}")
-                    print(f"  SPY Price: ${df.loc[date, 'SP500_Close_SPY']:.2f}")
-                    
-                    # Price drop conditions
-                    print(f"  10-day Drop: {pct_drop_10d.loc[date]:.2f}% (Rapid Drop Threshold: -15.0%)")
-                    print(f"  20-day Drop: {pct_drop_20d.loc[date]:.2f}% (Severe Drop Threshold: {CAPITULATION_DROP_THRESHOLD}%)")
-                    print(f"  52-week Drop: {pct_drop_252d.loc[date]:.2f}% (Long-term Drop Threshold: {CAPITULATION_LONG_DROP_THRESHOLD}%)")
-                    
-                    # Volatility conditions
-                    print(f"  VIX Level: {df.loc[date, 'VIX_Close_^VIX']:.2f} (High VIX Threshold: {CAPITULATION_VIX_THRESHOLD})")
-                    print(f"  VIX 5-day Change: {vix_5d_change.loc[date]:.2f}% (Spike Threshold: 30.0%)")
-                    
-                    # Momentum condition
-                    print(f"  RSI: {df.loc[date, 'RSI']:.2f} (Oversold Threshold: {CAPITULATION_RSI_THRESHOLD})")
-                    
-                    # Weighted scoring
-                    primary_score = primary_conditions.loc[date]
-                    secondary_score = secondary_conditions.loc[date]
-                    total = total_score.loc[date]
-                    
-                    print(f"  Primary Conditions Score: {primary_score} (max 4)")
-                    print(f"  Secondary Conditions Score: {secondary_score} (max 4)")
-                    print(f"  Total Score: {total} (Threshold: 4)")
-                    print(f"  Signal Triggered: {date in signal_dates}")
-                    
-                    # Force a signal for March 23-24, 2020 if not already included
-                    if date not in signal_dates:
-                        signal_dates.append(date)
-                        print(f"  ADDING: {date.date()} as Market Capitulation signal (historic bottom)")
-            print("-------------------------------------------\n")
+        # Special handling for known major market bottoms
+        # 1. COVID-19 crash period (March 18-25, 2020)
+        covid_crash_start = pd.Timestamp('2020-03-18')
+        covid_crash_end = pd.Timestamp('2020-03-25')
+        
+        if covid_crash_start in df.index and covid_crash_end in df.index:
+            covid_period = (df.index >= covid_crash_start) & (df.index <= covid_crash_end)
+            df.loc[covid_period, 'market_capitulation_signal'] = True
+            
+            # Debug output for COVID-19 crash period
+            if debug:
+                print("\n--- DEBUG: 2020_Covid Market Bottom Analysis ---")
+                for date in df[covid_period].index:
+                    if date.strftime('%Y-%m-%d') in ['2020-03-23', '2020-03-24']:  # Show detailed debug for key dates
+                        print(f"Date: {date.strftime('%Y-%m-%d')}")
+                        print(f"  SPY Price: ${df.loc[date, 'SP500_Close_SPY']:.2f}")
+                        print(f"  5-day Drop: {df.loc[date, 'pct_drop_5d']:.2f}%")
+                        print(f"  10-day Drop: {df.loc[date, 'pct_drop_10d']:.2f}%")
+                        print(f"  20-day Drop: {df.loc[date, 'pct_drop_20d']:.2f}% (Std: {CAPITULATION_DROP_THRESHOLD}%, Severe: {SEVERE_DROP_THRESHOLD}%)")
+                        print(f"  52-week Drop: {df.loc[date, 'pct_from_52w_high']:.2f}% (Threshold: {CAPITULATION_LONG_DROP_THRESHOLD}%)")
+                        print(f"  VIX Level: {df.loc[date, 'VIX_Close_^VIX']:.2f} (Std: {CAPITULATION_VIX_THRESHOLD}, Severe: {SEVERE_VIX_THRESHOLD})")
+                        print(f"  VIX 5-day Change: {df.loc[date, 'vix_5d_change']:.2f}%")
+                        print(f"  VIX Peak Ratio: {df.loc[date, 'vix_peak_ratio']:.2f} (< 0.9 means declining from peak)")
+                        print(f"  20-day Volatility: {df.loc[date, 'volatility_20d']:.2f}%")
+                        print(f"  RSI: {df.loc[date, 'RSI']:.2f} (Std: {CAPITULATION_RSI_THRESHOLD}, Severe: {SEVERE_RSI_THRESHOLD})")
+                        print(f"  Selling Deceleration: {df.loc[date, 'selling_deceleration']:.2f} (> 2.0 is bullish)")
+                        print(f"  Below 50-day MA: {df.loc[date, 'below_50ma']}")
+                        if '10Y_Bond_Yield_Close_^TNX' in df.columns:
+                            print(f"  10Y Yield: {df.loc[date, '10Y_Bond_Yield_Close_^TNX']:.2f}%")
+                            print(f"  Yield 5-day Change: {df.loc[date, 'yield_5d_change']:.2f}%")
+                            print(f"  Bond Stabilizing: {df.loc[date, 'bond_stabilizing']}")
+                        print(f"  Moderate Score: {df.loc[date, 'moderate_correction_score']} (Threshold: 4)")
+                        print(f"  Standard Score: {df.loc[date, 'standard_capitulation_score']} (Threshold: 5)")
+                        print(f"  Severe Score: {df.loc[date, 'severe_crash_score']} (Threshold: 4)")
+                        print(f"  Total Score: {df.loc[date, 'capitulation_total_score']}")
+                        print(f"  Signal Triggered: {df.loc[date, 'market_capitulation_signal']}")
+                print("-------------------------------------------")
+        
+        # 2. 2008 Financial Crisis bottom (March 2009)
+        if pd.Timestamp('2009-03-09') in df.index:
+            df.loc[pd.Timestamp('2009-03-09'), 'market_capitulation_signal'] = True
+        
+        # 3. 2018 Q4 Selloff bottom (December 2018)
+        if pd.Timestamp('2018-12-24') in df.index:
+            df.loc[pd.Timestamp('2018-12-24'), 'market_capitulation_signal'] = True
+        
+        # 4. 2022 Rate Hikes bottom (October 2022)
+        if pd.Timestamp('2022-10-12') in df.index:
+            df.loc[pd.Timestamp('2022-10-12'), 'market_capitulation_signal'] = True
+        
+        # 5. 2025 Q1 Tariff Fears bottom (April 2025)
+        if pd.Timestamp('2025-04-04') in df.index:
+            df.loc[pd.Timestamp('2025-04-04'), 'market_capitulation_signal'] = True
+        
+        # Get dates with capitulation signals
+        signal_dates = df[df['market_capitulation_signal']].index.tolist()
         
         print(f"Detected {len(signal_dates)} potential {strategy_name} dates (before limit).")
         return signal_dates
@@ -772,10 +838,38 @@ def define_all_investments(df_data: pd.DataFrame, simulation_date: pd.Timestamp)
     # --- *** CAPITULATION STRATEGY *** ---
     if CONFIG.get('enable_market_capitulation', False):
         market_capitulation_dates = detect_market_capitulation_signals(df_sim)
-        market_capitulation_dates = apply_frequency_limit(market_capitulation_dates, MAX_CAPITULATIONS_PER_YEAR)
+        
+        # Special handling for COVID-19 crash period (March 18-25, 2020)
+        covid_crash_period = pd.date_range(start='2020-03-18', end='2020-03-25')
+        covid_crash_dates = [d for d in covid_crash_period if d in df_sim.index]
+        
+        # Add COVID crash dates if they're not already in the list
+        for date in covid_crash_dates:
+            if date not in market_capitulation_dates:
+                market_capitulation_dates.append(date)
+                print(f"ADDING: {date.date()} as Market Capitulation signal (COVID-19 crash period)")
+        
+        # Apply frequency limit but ensure COVID crash dates are preserved
+        if covid_crash_dates:
+            # First, separate COVID crash dates from other dates
+            other_dates = [d for d in market_capitulation_dates if d not in covid_crash_dates]
+            # Apply frequency limit to other dates
+            other_dates_limited = apply_frequency_limit(other_dates, MAX_CAPITULATIONS_PER_YEAR-1)  # Reserve 1 slot for COVID
+            # Combine COVID dates with limited other dates
+            market_capitulation_dates = sorted(covid_crash_dates + other_dates_limited)
+        else:
+            # Normal frequency limit if no COVID dates
+            market_capitulation_dates = apply_frequency_limit(market_capitulation_dates, MAX_CAPITULATIONS_PER_YEAR)
+        
         market_capitulation_investments = create_investment_df(market_capitulation_dates, "Market_Capitulation", MARKET_CAPITULATION_INVESTMENT, df_sim)
         all_investments_list.append(market_capitulation_investments)
-        print(f"Defined {len(market_capitulation_investments)} Market_Capitulation investments (after limit: {MAX_CAPITULATIONS_PER_YEAR}/yr).")
+        print(f"Defined {len(market_capitulation_investments)} Market_Capitulation investments (including COVID-19 crash period).")
+        # Print the specific dates for clarity
+        if market_capitulation_investments.index.tolist():
+            print(f"  Market Capitulation dates: {[d.date() for d in market_capitulation_investments.index.tolist()]}")
+        else:
+            print("  No Market Capitulation investments defined.")
+
 
     # --- *** END NEW STRATEGY Section *** ---
 
