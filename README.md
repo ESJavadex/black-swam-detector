@@ -80,16 +80,19 @@ python3 main.py
 
 ## 📊 Example Visualizations
 
-![Market Corrections Comparison](market_corrections_comparison.png)
+![SP500 Price + Signals](img/sp500_price_signals.png)
+*SP500 price with investment signals.*
+
+![Market Corrections Comparison](img/market_corrections_comparison.png)
 *Comparison of market corrections and strategy responses.*
 
-![Signal Cumulative Value](signal_cumulative_value.png)
+![Signal Cumulative Value](img/signal_cumulative_value.png)
 *Cumulative value of the strategy over time.*
 
-![Signal Cumulative Value Normalized](signal_cumulative_value_normalized.png)
+![Signal Cumulative Value Normalized](img/signal_cumulative_value_normalized.png)
 *Normalized cumulative value for easier comparison.*
 
-![Signal Profit Per Dollar](signal_profit_per_dollar.png)
+![Signal Profit Per Dollar](img/signal_profit_per_dollar.png)
 *Profit per dollar invested by signal type.*
 
 > These plots provide insight into strategy performance, signal effectiveness, and market correction handling.
