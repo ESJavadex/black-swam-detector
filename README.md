@@ -35,6 +35,20 @@ This enhanced strategy extends basic DCA by adding extra investment under specif
 
 ---
 
+## 🚦 Investment Signals
+
+| Signal Name           | Trigger Condition                                             | Default Amount |
+|-----------------------|--------------------------------------------------------------|---------------|
+| **Fixed DCA**         | 1st of each month                                            | $475          |
+| **Extra Normal**      | Uptrend detected and RSI < 30                                | $100          |
+| **Extra Purple Alert**| Extreme negative returns and RSI < 30 (Black Swan event)     | $200          |
+| **Extra Pullback**    | Price drops > 5% from 10-day high and RSI < 30               | $150          |
+| **Extra Extreme Dip** | RSI < 25 (extreme oversold)                                  | $250          |
+
+Each signal can be enabled or disabled via the `CONFIG` dictionary at the top of the script.
+
+---
+
 ## 🛠️ Installation
 
 ### 1. Clone the repository
@@ -42,21 +56,78 @@ This enhanced strategy extends basic DCA by adding extra investment under specif
 git clone https://github.com/ESJavadex/black-swam-detector.git
 cd black-swam-detector
 ```
+
+### 2. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Run
+```bash
+python3 main.py
+```
+
 ---
 
 ## 📂 Output
 
 - 📈 **Interactive Plots** (via Plotly)
-- 📁 `enhanced_dca_transactions.csv` — detailed list of investments
-- 📁 `performance_summary.csv` — side-by-side comparison of strategy metrics
+- 📁 `enhanced_dca_transactions.csv` — detailed list of all investment transactions (date, amount, signal type, etc.)
+- 📁 `performance_summary.csv` — side-by-side comparison of strategy-level performance metrics
+- 📁 `signal_stats_summary.csv` — summary statistics for each investment signal (frequency, profitability, etc.)
 
 ---
 
-## 📊 Example Visualization
+## 📊 Example Visualizations
 
-![Sample Visualization](docs/sample_chart.png)
+![Market Corrections Comparison](market_corrections_comparison.png)
+*Comparison of market corrections and strategy responses.*
 
-> Shows SPY price with overlaid investment markers (color-coded by strategy type).
+![Signal Cumulative Value](signal_cumulative_value.png)
+*Cumulative value of the strategy over time.*
+
+![Signal Cumulative Value Normalized](signal_cumulative_value_normalized.png)
+*Normalized cumulative value for easier comparison.*
+
+![Signal Profit Per Dollar](signal_profit_per_dollar.png)
+*Profit per dollar invested by signal type.*
+
+> These plots provide insight into strategy performance, signal effectiveness, and market correction handling.
+
+---
+
+## 📋 Specifications
+
+### CSV Output Formats
+
+- **enhanced_dca_transactions.csv**
+  - Columns: `Date`, `Signal_Type`, `Amount`, `Price`, `Shares`, `Cumulative_Investment`, `Cumulative_Shares`, `Portfolio_Value`, ...
+  - Each row records an investment triggered by a specific signal, with running totals.
+
+- **performance_summary.csv**
+  - Columns: `Strategy`, `Total_Return`, `CAGR`, `Sharpe_Ratio`, `Sortino_Ratio`, `Max_Drawdown`, `Calmar_Ratio`, `Alpha`, `Beta`, ...
+  - Summarizes key metrics for each strategy or signal.
+
+- **signal_stats_summary.csv**
+  - Columns: `Signal_Type`, `Num_Trades`, `Total_Invested`, `Total_Value`, `Profit_Per_Dollar`, `Win_Rate`, ...
+  - Aggregates statistics for each signal type.
+
+### Image/Plot Outputs
+
+- **market_corrections_comparison.png**: Bar/line chart comparing major market corrections and strategy responses.
+- **signal_cumulative_value.png**: Cumulative value of the portfolio over time, by signal.
+- **signal_cumulative_value_normalized.png**: Same as above, but normalized to initial value for comparison.
+- **signal_profit_per_dollar.png**: Bar chart of profit per dollar invested, per signal type.
+
+### Investment Signal Logic
+
+- **Fixed DCA**: Invests a fixed amount on the 1st of each month.
+- **Extra Normal**: Invests when uptrend is detected and RSI < 30.
+- **Extra Purple Alert**: Invests when extreme negative returns occur and RSI < 30 (Black Swan event).
+- **Extra Pullback**: Invests when price drops > 5% from 10-day high and RSI < 30.
+- **Extra Extreme Dip**: Invests when RSI < 25.
+
+See the `CONFIG` dictionary for enabling/disabling each signal.
 
 ---
 
