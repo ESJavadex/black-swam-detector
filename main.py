@@ -29,6 +29,7 @@ from datetime import datetime
 import sys
 import traceback
 from typing import List, Dict, Optional, Tuple
+import os
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -1257,6 +1258,11 @@ def generate_visualizations(df_data: pd.DataFrame, enhanced_dca_portfolio: pd.Da
             legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
             hovermode='x unified', yaxis_range=yaxis_range
         )
+        # Ensure static directory exists
+        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+        os.makedirs(static_dir, exist_ok=True)
+        html_path = os.path.join(static_dir, 'latest_plot.html')
+        fig_sp500_signals.write_html(html_path)
         fig_sp500_signals.show()
         print("SP500 Price + Signals plot generated.")
 
