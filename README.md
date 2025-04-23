@@ -62,10 +62,35 @@ cd black-swam-detector
 pip install -r requirements.txt
 ```
 
-### 3. Run
+### 3. Run (Native)
 ```bash
 python3 main.py
 ```
+
+---
+
+## 🐳 Running with Docker & Docker Compose
+
+You can run the simulation in a containerized environment using Docker or Docker Compose.
+
+### 1. Build the Docker image
+```bash
+docker build -t black-swam-detector .
+```
+
+### 2. Run with Docker
+```bash
+docker run --rm -it black-swam-detector
+```
+
+### 3. Run with Docker Compose
+```bash
+docker-compose up --build
+```
+
+- The container exposes port 5002 to all hosts (`0.0.0.0:5002`).
+- **Note:** The script is a CLI tool and does not start a web server, but port 5002 is exposed for compatibility and future extensions.
+- To pass arguments (e.g., a simulation date), modify the `command` in `docker-compose.yml` or append them to the `docker run` command.
 
 ---
 

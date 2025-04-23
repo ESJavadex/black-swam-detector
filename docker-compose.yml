@@ -1,0 +1,8 @@
+version: '3.8'
+services:
+  black-swam-detector:
+    build: .
+    container_name: black-swam-detector
+    ports:
+      - "5002:5002"
+    command: ["python", "main.py"]
